@@ -1,5 +1,7 @@
 import pandas as pd
 import xgboost as xgb
+import catboost
+import pdb
 from sklearn import preprocessing
 from sklearn.cross_validation import train_test_split
 import numpy as np
@@ -42,7 +44,6 @@ def plot_learning_curve(x_train, y_train, params):
         cv_result = xgb.cv(params, dtrain, nfold=5, verbose_eval=False)
         validation_err.append(cv_result["test-mlogloss-mean"].iloc[-1])
         training_err.append(cv_result["train-mlogloss-mean"].iloc[-1])
-
     plt.plot(trainingsize[::-1], training_err, 'r', label='training error')
     plt.plot(trainingsize[::-1], validation_err, 'g', label='validation error')
     plt.legend()
@@ -53,9 +54,9 @@ def plot_learning_curve(x_train, y_train, params):
 
 def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
     y_train, label_encoder = encode_labels(y_train)
-
+    xtrain, xval, ytrain, yval = train_test_split(x_train, y_train, test_size=valsize)
+    
     if tool == 'xgboost':
-        xtrain, xval, ytrain, yval = train_test_split(x_train, y_train, test_size=valsize)
         dtrain = xgb.DMatrix(xtrain, ytrain)
         dval = xgb.DMatrix(xval)
         model = xgb.train(params, dtrain)
@@ -65,20 +66,40 @@ def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
                                    data=preds)
         predictions['validation data'] = yval
         softmax_preds = [np.argmax(x) for x in preds]
-        softmax_preds = label_encoder.inverse_transform(softmax_preds)
-        predictions['softmax predictions'] = softmax_preds
-        accuracy = [1 for i in range(len(predictions)) if \
-                    (predictions["validation data"].iloc[i] == predictions["softmax predictions"].iloc[i])]
-        accuracy = 1. * np.sum(accuracy) / len(predictions)
-        print('\n')
-        print("Overall accuracy: %s" %(accuracy))
-        print("\n")
-        print("Confusion Matrix: \n")
-        print(confusion_matrix(predictions["validation data"], predictions["softmax predictions"]))
-        print('\n')
+
+    if tool == 'catboost':
+        cat_features = []
+        for col in xtrain.columns:
+            if col in to_encode:
+               cat_features.append(list(xtrain.columns).index(col))
+        ctrain = catboost.Pool(xtrain, ytrain)
+        cval = catboost.Pool(xval)
+        model = catboost.CatBoostClassifier(iterations=500, learning_rate=0.03, depth=8,
+                                            loss_function='MultiClass')
+        model.fit(ctrain, cat_features=cat_features)
+        preds = model.predict_proba(cval)
+        yval = label_encoder.inverse_transform(yval)
+        predictions = pd.DataFrame(columns=['functional', 'functional-need repairs', 'non functional'],
+                                   data=preds)
+        predictions['validation data'] = yval
+        softmax_preds = [np.argmax(x) for x in preds]
+
+    softmax_preds = label_encoder.inverse_transform(softmax_preds)
+    predictions['softmax predictions'] = softmax_preds
+    accuracy = [1 for i in range(len(predictions)) if \
+                (predictions["validation data"].iloc[i] == predictions["softmax predictions"].iloc[i])]
+    accuracy = 1. * np.sum(accuracy) / len(predictions)
+    print('\n')
+    print("Overall accuracy: %s" %(accuracy))
+    print("\n")
+    print("Confusion Matrix: \n")
+    print(confusion_matrix(predictions["validation data"], predictions["softmax predictions"]))
+    print('\n')
     return model
 
+
 if __name__ == '__main__':
+
     df = pd.read_csv("training_cleaned.csv", parse_dates=["date_recorded"])
     df = df.fillna(-999)
     to_encode = ['funder', 'installer', 'basin', 'region', 'lga', 'recorded_by', 'scheme_management', 'scheme_name',
@@ -103,7 +124,8 @@ if __name__ == '__main__':
 
     x_train = df.drop(['id', 'date_recorded','status_group'], axis=1)
     y_train = df['status_group']
-    model = evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1)
+    model = evaluate(x_train, y_train, params, tool='catboost', valsize=0.1)
+    pdb.set_trace()
     plot_learning_curve(x_train, y_train, params)
     cv = cross_validate(x_train, y_train, params, tool='xgboost')
     plot_cv(cv)
