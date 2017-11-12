@@ -57,6 +57,7 @@ def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
     xtrain, xval, ytrain, yval = train_test_split(x_train, y_train, test_size=valsize)
     
     if tool == 'xgboost':
+        print("running xgboost model \n")
         dtrain = xgb.DMatrix(xtrain, ytrain)
         dval = xgb.DMatrix(xval)
         model = xgb.train(params, dtrain)
@@ -68,14 +69,16 @@ def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
         softmax_preds = [np.argmax(x) for x in preds]
 
     if tool == 'catboost':
+        print("running catboost model \n")
         cat_features = []
         for col in xtrain.columns:
             if col in to_encode:
                cat_features.append(list(xtrain.columns).index(col))
         ctrain = catboost.Pool(xtrain, ytrain)
         cval = catboost.Pool(xval)
-        model = catboost.CatBoostClassifier(iterations=500, learning_rate=0.03, depth=8,
-                                            loss_function='MultiClass')
+        model = catboost.CatBoostClassifier(iterations=500, learning_rate=0.05, depth=6,
+                                            od_type = "Iter", od_wait = 10, ctr_description='Counter',
+                                            l2_leaf_reg=5, loss_function='MultiClass', verbose=True)
         model.fit(ctrain, cat_features=cat_features)
         preds = model.predict_proba(cval)
         yval = label_encoder.inverse_transform(yval)
