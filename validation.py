@@ -31,8 +31,28 @@ def plot_cv(cv_result):
     return
 
 
-def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
+def plot_learning_curve(x_train, y_train, params):
     y_train, lable_encoder = encode_labels(y_train)
+    training_err = []
+    validation_err = []
+    trainingsize = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+    for percent in trainingsize:
+        xtrain, xval, ytrain, yval = train_test_split(x_train, y_train, test_size=percent)
+        dtrain = xgb.DMatrix(xtrain, ytrain)
+        cv_result = xgb.cv(params, dtrain, nfold=5, verbose_eval=False)
+        validation_err.append(cv_result["test-mlogloss-mean"].iloc[-1])
+        training_err.append(cv_result["train-mlogloss-mean"].iloc[-1])
+
+    plt.plot(trainingsize[::-1], training_err, 'r', label='training error')
+    plt.plot(trainingsize[::-1], validation_err, 'g', label='validation error')
+    plt.legend()
+    plt.xlabel('Training Set size')
+    plt.show()
+    return
+
+
+def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
+    y_train, label_encoder = encode_labels(y_train)
 
     if tool == 'xgboost':
         xtrain, xval, ytrain, yval = train_test_split(x_train, y_train, test_size=valsize)
@@ -40,12 +60,12 @@ def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
         dval = xgb.DMatrix(xval)
         model = xgb.train(params, dtrain)
         preds = model.predict(dval)
-        yval = le.inverse_transform(yval)
+        yval = label_encoder.inverse_transform(yval)
         predictions = pd.DataFrame(columns=['functional', 'functional-need repairs', 'non functional'],
                                    data=preds)
         predictions['validation data'] = yval
         softmax_preds = [np.argmax(x) for x in preds]
-        softmax_preds = le.inverse_transform(softmax_preds)
+        softmax_preds = label_encoder.inverse_transform(softmax_preds)
         predictions['softmax predictions'] = softmax_preds
         accuracy = [1 for i in range(len(predictions)) if \
                     (predictions["validation data"].iloc[i] == predictions["softmax predictions"].iloc[i])]
@@ -56,7 +76,7 @@ def evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1):
         print("Confusion Matrix: \n")
         print(confusion_matrix(predictions["validation data"], predictions["softmax predictions"]))
         print('\n')
-    return
+    return model
 
 if __name__ == '__main__':
     df = pd.read_csv("training_cleaned.csv", parse_dates=["date_recorded"])
@@ -83,6 +103,7 @@ if __name__ == '__main__':
 
     x_train = df.drop(['id', 'date_recorded','status_group'], axis=1)
     y_train = df['status_group']
-    evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1)
+    model = evaluate(x_train, y_train, params, tool='xgboost', valsize=0.1)
+    plot_learning_curve(x_train, y_train, params)
     cv = cross_validate(x_train, y_train, params, tool='xgboost')
     plot_cv(cv)
